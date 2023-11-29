@@ -44,6 +44,7 @@ use std::path::Path;
 ///
 /// Uses `clonefile` library function. This is supported on OS X Version >=10.12 and iOS version >= 10.0
 /// This will work on APFS partitions (which means most desktop systems are capable).
+/// If src names a directory, the directory hierarchy is cloned as if each item was cloned individually.
 ///
 /// ## Windows
 ///
@@ -101,12 +102,12 @@ pub fn reflink_or_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Resu
 }
 
 fn check_is_file_and_error(from: &Path, err: io::Error) -> io::Error {
-    if from.is_file() {
+    if fs::symlink_metadata(from).map_or(false, |m| m.is_file() || m.is_dir()) {
         err
     } else {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            "the source path is not an existing regular file",
+            format!("the source path is not an existing regular file: {}", err),
         )
     }
 }

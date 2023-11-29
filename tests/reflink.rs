@@ -48,6 +48,25 @@ fn reflink_dest_is_dir() {
     }
 }
 
+#[cfg(unix)] // No reliable symlinking on windows
+#[test]
+fn reflink_src_is_symlink() {
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("target.txt");
+    let symlink = dir.path().join("symlink.txt");
+    File::create(&target).unwrap();
+    std::os::unix::fs::symlink(&target, &symlink).unwrap();
+    let dest_file_path = dir.path().join("dest.txt");
+
+    match reflink(symlink, dest_file_path) {
+        Ok(()) => panic!(),
+        Err(e) => {
+            println!("{:?}", e);
+            assert_eq!(e.kind(), io::ErrorKind::InvalidInput)
+        }
+    }
+}
+
 #[test]
 fn reflink_src_is_dir() {
     let dir = tempdir().unwrap();
@@ -57,10 +76,30 @@ fn reflink_src_is_dir() {
         Ok(()) => panic!(),
         Err(e) => {
             println!("{:?}", e);
-            assert_eq!(e.kind(), io::ErrorKind::InvalidInput)
+            // `io::ErrorKind::IsADirectory` is unstable
+            assert_eq!(e.kind().to_string(), "is a directory")
         }
     }
 }
+
+#[test]
+fn reflink_existing_dest_dir_results_in_error() {
+    let dir = tempdir().unwrap();
+    let src_file_path = dir.path().join("src");
+    let dest_file_path = dir.path().join("dest");
+
+    let _src_file = fs::create_dir(&src_file_path).unwrap();
+    let _dest_file = fs::create_dir(&dest_file_path).unwrap();
+
+    match reflink(&src_file_path, &dest_file_path) {
+        Ok(()) => panic!(),
+        Err(e) => {
+            println!("{:?}", e);
+            assert_eq!(e.kind(), io::ErrorKind::AlreadyExists)
+        }
+    }
+}
+
 
 #[test]
 fn reflink_existing_dest_results_in_error() {
