@@ -40,7 +40,7 @@ use std::path::Path;
 /// Uses `ioctl_ficlone`. Supported file systems include btrfs and XFS (and maybe more in the future).
 /// NOTE that it generates a temporary file and is not atomic.
 ///
-/// ## OS X / iOS
+/// ## MacOS / OS X / iOS
 ///
 /// Uses `clonefile` library function. This is supported on OS X Version >=10.12 and iOS version >= 10.0
 /// This will work on APFS partitions (which means most desktop systems are capable).
@@ -102,12 +102,17 @@ pub fn reflink_or_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Resu
 }
 
 fn check_is_file_and_error(from: &Path, err: io::Error) -> io::Error {
-    if fs::symlink_metadata(from).map_or(false, |m| m.is_file() || m.is_dir()) {
-        err
-    } else {
+    // According to https://www.manpagez.com/man/2/clonefile/, macos can reflink file, directories
+    // and symlinks, so it does not make sense to check the metadata
+    if !cfg!(any(target_os = "macos", target_os = "ios"))
+        // `is_file()` alone traverses symlinks
+        && !fs::symlink_metadata(from).map_or(false, |m| m.is_file())
+    {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("the source path is not an existing regular file: {}", err),
         )
+    } else {
+        err
     }
 }

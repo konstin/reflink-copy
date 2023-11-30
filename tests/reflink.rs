@@ -41,14 +41,17 @@ fn reflink_dest_is_dir() {
         Ok(()) => panic!(),
         Err(e) => {
             println!("{:?}", e);
-            if !cfg!(windows) {
+            if cfg!(windows) {
+                assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
+            } else {
                 assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
             }
         }
     }
 }
 
-#[cfg(unix)] // No reliable symlinking on windows
+// No reliable symlinking on windows, while macos can reflink symlinks.
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "ios"))))]
 #[test]
 fn reflink_src_is_symlink() {
     let dir = tempdir().unwrap();
@@ -67,6 +70,7 @@ fn reflink_src_is_symlink() {
     }
 }
 
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 #[test]
 fn reflink_src_is_dir() {
     let dir = tempdir().unwrap();
@@ -76,8 +80,7 @@ fn reflink_src_is_dir() {
         Ok(()) => panic!(),
         Err(e) => {
             println!("{:?}", e);
-            // `io::ErrorKind::IsADirectory` is unstable
-            assert_eq!(e.kind().to_string(), "is a directory")
+            assert_eq!(e.kind(), io::ErrorKind::InvalidInput);
         }
     }
 }
@@ -95,11 +98,14 @@ fn reflink_existing_dest_dir_results_in_error() {
         Ok(()) => panic!(),
         Err(e) => {
             println!("{:?}", e);
-            assert_eq!(e.kind(), io::ErrorKind::AlreadyExists)
+            if cfg!(any(target_os = "macos", target_os = "ios")) {
+                assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+            } else {
+                assert_eq!(e.kind(), io::ErrorKind::InvalidInput);
+            }
         }
     }
 }
-
 
 #[test]
 fn reflink_existing_dest_results_in_error() {
