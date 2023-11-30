@@ -59,7 +59,24 @@ use std::path::Path;
 pub fn reflink(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     #[cfg_attr(feature = "tracing", tracing_attributes::instrument(name = "reflink"))]
     fn inner(from: &Path, to: &Path) -> io::Result<()> {
-        sys::reflink(from, to).map_err(|err| check_is_file_and_error(from, err))
+        sys::reflink(from, to).map_err(|err| {
+            // Linux and Windows will return an inscrutable error when `from` is a directory or a
+            // symlink, so add the real problem to the error. We need to use `fs::symlink_metadata`
+            // here because `from.is_file()` traverses symlinks.
+            //
+            // According to https://www.manpagez.com/man/2/clonefile/, Macos otoh can reflink files,
+            // directories and symlinks, so the original error is fine.
+            if !cfg!(any(target_os = "macos", target_os = "ios"))
+                && !fs::symlink_metadata(from).map_or(false, |m| m.is_file())
+            {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("the source path is not an existing regular file: {}", err),
+                )
+            } else {
+                err
+            }
+        })
     }
 
     inner(from.as_ref(), to.as_ref())
@@ -79,6 +96,15 @@ pub fn reflink(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
 ///     Err(e) => println!("an error occured: {:?}", e)
 /// }
 /// ```
+///
+/// # Implementation details per platform
+///
+/// ## MacOS / OS X / iOS
+///
+/// If src names a directory, the directory hierarchy is cloned as if each item was cloned
+/// individually. This method does not provide a fallback for directories, so the fallback will also
+/// fail if reflinking failed. Macos supports reflinking symlinks, which is supported by the
+/// fallback.
 #[inline(always)]
 pub fn reflink_or_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<Option<u64>> {
     #[cfg_attr(
@@ -90,29 +116,22 @@ pub fn reflink_or_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Resu
             #[cfg(feature = "tracing")]
             tracing::warn!(?_err, "Failed to reflink, fallback to fs::copy");
 
-            fs::copy(from, to)
-                .map(Some)
-                .map_err(|err| check_is_file_and_error(from, err))
+            fs::copy(from, to).map(Some).map_err(|err| {
+                // Both regular files and symlinks to regular files can be copied, so unlike
+                // `reflink` we don't want to report invalid input on both files and and symlinks
+                if from.is_file() {
+                    err
+                } else {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("the source path is not an existing regular file: {}", err),
+                    )
+                }
+            })
         } else {
             Ok(None)
         }
     }
 
     inner(from.as_ref(), to.as_ref())
-}
-
-fn check_is_file_and_error(from: &Path, err: io::Error) -> io::Error {
-    // According to https://www.manpagez.com/man/2/clonefile/, macos can reflink file, directories
-    // and symlinks, so it does not make sense to check the metadata
-    if !cfg!(any(target_os = "macos", target_os = "ios"))
-        // `is_file()` alone traverses symlinks
-        && !fs::symlink_metadata(from).map_or(false, |m| m.is_file())
-    {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("the source path is not an existing regular file: {}", err),
-        )
-    } else {
-        err
-    }
 }
