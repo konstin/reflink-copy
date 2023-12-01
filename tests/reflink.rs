@@ -91,8 +91,8 @@ fn reflink_existing_dest_dir_results_in_error() {
     let src_file_path = dir.path().join("src");
     let dest_file_path = dir.path().join("dest");
 
-    let _src_file = fs::create_dir(&src_file_path).unwrap();
-    let _dest_file = fs::create_dir(&dest_file_path).unwrap();
+    fs::create_dir(&src_file_path).unwrap();
+    fs::create_dir(&dest_file_path).unwrap();
 
     match reflink(&src_file_path, &dest_file_path) {
         Ok(()) => panic!(),
